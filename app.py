@@ -1,71 +1,169 @@
 from flask import Flask, jsonify, abort
-from typing import Tuple
+from flasgger import Swagger
+import json
+from typing import Tuple, Dict, Any
 
 app = Flask(__name__)
+swagger = Swagger(app)
 
-
-def data_loader() -> Tuple[dict, dict]:
+def data_loader() -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """
     Функция загружает данные из json файлов и преобразует их в dict.
     Функция не должна нарушать изначальную структуру данных.
     """
-    return {}, {}
-
+    with open('data/posts.json', 'r', encoding='utf-8') as f:
+        posts = json.load(f)['posts']
+    with open('data/comments.json', 'r', encoding='utf-8') as f:
+        comments = json.load(f)['comments']
+    return posts, comments
 
 @app.route("/")
-def get_posts():
+def get_posts() -> jsonify:
     """
-    На странице / вывести json в котором каждый элемент - это:
-    - пост из файла posts.json.
-    - для каждой поста указано кол-во комментариев этого поста из файла comments.json
+    Получение всех постов.
 
-    Формат ответа:
-    posts: [
-        {
-            id: <int>,
-            title: <str>,
-            body: <str>, 
-            author:	<str>,
-            created_at: <str>,
-            comments_count: <int>
-        }
-    ],
-    total_results: <int>
-
-    Порядок ключей словаря в ответе не важен
+    ---
+    responses:
+      200:
+        description: Успешный ответ
+        schema:
+          id: Posts
+          properties:
+            posts:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                    description: Идентификатор поста
+                  title:
+                    type: string
+                    description: Заголовок поста
+                  body:
+                    type: string
+                    description: Тело поста
+                  author:
+                    type: string
+                    description: Автор поста
+                  created_at:
+                    type: string
+                    description: Время создания поста
+                  comments_count:
+                    type: integer
+                    description: Количество комментариев к посту
+            total_results:
+              type: integer
+              description: Общее количество постов
     """
     posts, comments = data_loader()
-    output = {"body": "Social posts"}
-
+    
+    # Подсчет комментариев для каждого поста
+    comments_count = {post['id']: 0 for post in posts}
+    for comment in comments:
+        post_id = comment['post_id']
+        if post_id in comments_count:
+            comments_count[post_id] += 1
+    
+    # Формирование ответа
+    posts_with_comments = []
+    for post in posts:
+        post_with_comments = {
+            'id': post['id'],
+            'title': post['title'],
+            'body': post['body'],
+            'author': post['author'],
+            'created_at': post['created_at'],
+            'comments_count': comments_count[post['id']]
+        }
+        posts_with_comments.append(post_with_comments)
+    
+    output = {
+        'posts': posts_with_comments,
+        'total_results': len(posts_with_comments)
+    }
     return jsonify(output)
-
 
 @app.route("/posts/<int:post_id>")
-def get_post(post_id):
+def get_post(post_id: int) -> jsonify:
     """
-    На странице /posts/<post_id> вывести json, который должен содержать:
-    - пост с указанным в ссылке id
-    - список всех комментариев к новости
+    Получение информации о конкретном посте по его идентификатору.
 
-    Отдавайте ошибку abort(404), если пост не существует.
-
-
-    Формат ответа:
-    id: <int>,
-    title: <str>,
-    body: <str>, 
-    author:	<str>,
-    created_at: <str>
-    comments: [
-        "user": <str>,
-        "post_id": <int>,
-        "comment": <str>,
-        "created_at": <str>
-    ]
-
-    Порядок ключей словаря в ответе не важен
+    ---
+    parameters:
+      - name: post_id
+        in: path
+        type: integer
+        required: true
+        description: Идентификатор поста
+    responses:
+      200:
+        description: Успешный ответ
+        schema:
+          id: Post
+          properties:
+            id:
+              type: integer
+              description: Идентификатор поста
+            title:
+              type: string
+              description: Заголовок поста
+            body:
+              type: string
+              description: Тело поста
+            author:
+              type: string
+              description: Автор поста
+            created_at:
+              type: string
+              description: Время создания поста
+            comments:
+              type: array
+              items:
+                type: object
+                properties:
+                  user:
+                    type: string
+                    description: Автор комментария
+                  post_id:
+                    type: integer
+                    description: Идентификатор поста, к которому относится комментарий
+                  comment:
+                    type: string
+                    description: Текст комментария
+                  created_at:
+                    type: string
+                    description: Время создания комментария
+      404:
+        description: Пост не найден
     """
     posts, comments = data_loader()
-    output = {"body": "Post: %d" % post_id}
+    post = next((post for post in posts if post['id'] == post_id), None)
+    if post is None:
+        abort(404, description="Post not found")
+    
+    # Формирование списка комментариев для поста
+    post_comments = [
+        {
+            'user': comment['user'],
+            'post_id': comment['post_id'],
+            'comment': comment['comment'],
+            'created_at': comment['created_at']
+        }
+        for comment in comments if comment['post_id'] == post_id
+    ]
+        
+    # Формирование ответа
+    post_with_comments: Dict[str, Any] = {
+        'id': post['id'],
+        'title': post['title'],
+        'body': post['body'],
+        'author': post['author'],
+        'created_at': post['created_at'],
+        'comments': post_comments
+    }
+    return jsonify(post_with_comments)
 
-    return jsonify(output)
+
+if __name__ == "__main__":
+    app.run(debug=True)
