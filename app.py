@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, abort
+from flask import Flask, jsonify, abort, make_response
 from flasgger import Swagger
 import json
 from typing import Tuple, Dict, Any
@@ -11,10 +11,17 @@ def data_loader() -> Tuple[Dict[str, Any], Dict[str, Any]]:
     Функция загружает данные из json файлов и преобразует их в dict.
     Функция не должна нарушать изначальную структуру данных.
     """
-    with open('data/posts.json', 'r', encoding='utf-8') as f:
-        posts = json.load(f)['posts']
-    with open('data/comments.json', 'r', encoding='utf-8') as f:
-        comments = json.load(f)['comments']
+    try:
+        with open('data/posts.json', 'r', encoding='utf-8') as f:
+            posts = json.load(f)['posts']
+        with open('data/comments.json', 'r', encoding='utf-8') as f:
+            comments = json.load(f)['comments']
+    except FileNotFoundError as e:
+        abort(500, description=f"File not found: {e.filename}")
+    except json.JSONDecodeError as e:
+        abort(500, description=f"Error decoding JSON: {e.msg}")
+    except Exception as e:
+        abort(500, description=f"Unexpected error: {str(e)}")
     return posts, comments
 
 @app.route("/")
@@ -56,7 +63,10 @@ def get_posts() -> jsonify:
               type: integer
               description: Общее количество постов
     """
-    posts, comments = data_loader()
+    try:
+        posts, comments = data_loader()
+    except Exception as e:
+        return make_response(jsonify({"error": str(e)}), 500)
     
     # Подсчет комментариев для каждого поста
     comments_count = {post['id']: 0 for post in posts}
@@ -137,7 +147,11 @@ def get_post(post_id: int) -> jsonify:
       404:
         description: Пост не найден
     """
-    posts, comments = data_loader()
+    try:
+        posts, comments = data_loader()
+    except Exception as e:
+        return make_response(jsonify({"error": str(e)}), 500)
+
     post = next((post for post in posts if post['id'] == post_id), None)
     if post is None:
         abort(404, description="Post not found")
@@ -164,6 +178,13 @@ def get_post(post_id: int) -> jsonify:
     }
     return jsonify(post_with_comments)
 
+@app.errorhandler(404)
+def not_found(error):
+    return make_response(jsonify({"error": "Not found", "message": error.description}), 404)
+
+@app.errorhandler(500)
+def internal_error(error):
+    return make_response(jsonify({"error": "Internal Server Error", "message": error.description}), 500)
 
 if __name__ == "__main__":
     app.run(debug=True)
